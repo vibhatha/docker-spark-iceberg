@@ -95,8 +95,9 @@ RUN mkdir -p /home/iceberg/data \
  && curl https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2021-05.parquet -o /home/iceberg/data/yellow_tripdata_2021-05.parquet \
  && curl https://d37ci6vzurychx.cloudfront.net/trip-data/yellow_tripdata_2021-04.parquet -o /home/iceberg/data/yellow_tripdata_2021-04.parquet
 
-RUN mkdir -p /home/iceberg/localwarehouse /home/iceberg/notebooks /home/iceberg/warehouse /home/iceberg/spark-events /home/iceberg
+RUN mkdir -p /home/iceberg/localwarehouse /home/iceberg/notebooks /home/iceberg/warehouse /home/iceberg/spark-events /home/iceberg /home/iceberg/scripts /home/iceberg/bin
 COPY notebooks/ /home/iceberg/notebooks
+COPY scripts/ /home/iceberg/scripts
 
 # Add a notebook command
 RUN echo '#! /bin/sh' >> /bin/notebook \
@@ -125,6 +126,33 @@ RUN chmod u+x /opt/spark/sbin/* && \
 COPY .pyiceberg.yaml /root/.pyiceberg.yaml
 
 COPY entrypoint.sh .
+
+# SUBSTRAIT RELATED CHANGES
+RUN mkdir -p /home/iceberg/substrait
+RUN BIN="/home/iceberg/bin" && \
+    VERSION="1.14.0" && \
+    curl -sSL "https://github.com/bufbuild/buf/releases/download/v${VERSION}/buf-$(uname -s)-$(uname -m)" -o "${BIN}/buf" && \
+    chmod u+x "${BIN}/buf"
+RUN echo "export PATH=$PATH:/home/iceberg/bin" >> ~/.bashrc
+ENV PATH="/home/iceberg/bin:${PATH}"
+RUN cd /home/iceberg/substrait && \
+    git clone --recursive https://github.com/vibhatha/pyiceberg_substrait.git
+RUN cd /home/iceberg/substrait/pyiceberg_substrait && \
+    git submodule sync --recursive && git submodule update --init --recursive && \
+    pip3 install protobuf==3.20.1 protoletariat==2.0.0 pytest==7.0.0 setuptools==61.0.0 setuptools_scm==6.2.0 ibis==3.2.0 ibis-substrait==2.28.1
+RUN cd /home/iceberg/substrait/pyiceberg_substrait/substrait-python && git submodule sync --recursive && git submodule update --init --recursive && \
+    pip3 install .
+RUN cd /home/iceberg/substrait/pyiceberg_substrait && \
+    pip3 install .
+ENV PROTOBUF_VERSION=3.20.1
+RUN mkdir -p /home/iceberg/include
+RUN cd /home/iceberg/substrait && \
+  wget https://github.com/protocolbuffers/protobuf/releases/download/v3.20.1/protoc-${PROTOBUF_VERSION}-linux-x86_64.zip && \
+  unzip -o protoc-${PROTOBUF_VERSION}-linux-x86_64.zip -d ./proto && chmod 776 -R ./proto/bin && \
+  cp ./proto/bin/protoc /home/iceberg/bin/ && \
+  cp -R ./proto/include/* /home/iceberg/include/
+
+RUN cd /home/iceberg/substrait/pyiceberg_substrait/substrait-python && chmod u+x gen_proto.sh && ./gen_proto.sh
 
 ENTRYPOINT ["./entrypoint.sh"]
 CMD ["notebook"]
